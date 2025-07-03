@@ -18,6 +18,7 @@ from multiprocessing.pool import ThreadPool
 from multiprocessing.pool import Pool
 from functools import partial
 from tqdm import tqdm
+from PIL import ImageFont, ImageDraw
 
 from megadetector.data_management.annotations.annotation_constants import detector_bbox_category_id_to_name
 from megadetector.detection.run_detector import get_typical_confidence_threshold_from_results
@@ -111,9 +112,52 @@ def _render_image(entry,
     # If output_image_width is -1 or None, this will just return the original image
     image = vis_utils.resize_image(image, output_image_width)
 
+    # Find the detection with the highest confidence
+    highest_conf_detection = None
+    if entry['detections']:
+        highest_conf_detection = max(entry['detections'], key=lambda x: x['conf'])
+
+    # Generate labels for the highest confidence detection
+    display_strs = []
+    if highest_conf_detection and highest_conf_detection['conf'] >= confidence_threshold:
+        detection_label = detector_label_map.get(highest_conf_detection['category'], highest_conf_detection['category'])
+        display_strs.append(f"{detection_label}: {round(highest_conf_detection['conf'] * 100)}%")
+
+        if 'classifications' in highest_conf_detection:
+            for class_cat, class_conf in highest_conf_detection['classifications']:
+                if class_conf >= classification_confidence_threshold:
+                    classification_label = classification_label_map.get(class_cat, class_cat)
+                    display_strs.append(f"  {classification_label}: {round(class_conf * 100)}%")
+
+    # Draw labels on the top of the image
+    if display_strs:
+        font = ImageFont.load_default()
+        draw = ImageDraw.Draw(image)
+        y_offset = 10
+        for s in display_strs:
+            text_size = draw.textbbox((0, 0), s, font=font)
+            text_width = text_size[2] - text_size[0]
+            text_height = text_size[3] - text_size[1]
+            
+            # Add a background rectangle
+            draw.rectangle([5, y_offset, 5 + text_width + 10, y_offset + text_height + 10], fill='black')
+            draw.text((10, y_offset + 5), s, font=font, fill='white')
+            y_offset += text_height + 15
+
+    # The API for render_detection_bounding_boxes doesn't have an option to render
+    # boxes without classification labels (it renders classification IDs if the label
+    # map is None).  So, to render boxes without any labels, we send the renderer
+    # a copy of the detections list with classification results stripped out.
+    detections_for_bbox_rendering = []
+    for d in entry['detections']:
+        d_copy = d.copy()
+        if 'classifications' in d_copy:
+            del d_copy['classifications']
+        detections_for_bbox_rendering.append(d_copy)
+        
     vis_utils.render_detection_bounding_boxes(
-        entry['detections'], image,
-        label_map=detector_label_map,
+        detections_for_bbox_rendering, image,
+        label_map=None,  # Pass None to avoid drawing labels on boxes
         classification_label_map=classification_label_map,
         confidence_threshold=confidence_threshold,
         classification_confidence_threshold=classification_confidence_threshold,

@@ -7,7 +7,7 @@ detector output result file (.json), optionally writing an HTML index file.
 
 """
 
-#%% Imports
+# %% Imports
 
 import argparse
 import os
@@ -20,8 +20,12 @@ from functools import partial
 from tqdm import tqdm
 from PIL import ImageFont, ImageDraw
 
-from megadetector.data_management.annotations.annotation_constants import detector_bbox_category_id_to_name
-from megadetector.detection.run_detector import get_typical_confidence_threshold_from_results
+from megadetector.data_management.annotations.annotation_constants import (
+    detector_bbox_category_id_to_name,
+)
+from megadetector.detection.run_detector import (
+    get_typical_confidence_threshold_from_results,
+)
 from megadetector.utils.ct_utils import get_max_conf
 from megadetector.utils import write_html_image_list
 from megadetector.utils.path_utils import path_is_abs
@@ -30,7 +34,7 @@ from megadetector.visualization import visualization_utils as vis_utils
 from megadetector.visualization.visualization_utils import blur_detections
 
 
-#%% Constants
+# %% Constants
 
 # This will only be used if a category mapping is not available in the results file.
 DEFAULT_DETECTOR_LABEL_MAP = {
@@ -38,54 +42,64 @@ DEFAULT_DETECTOR_LABEL_MAP = {
 }
 
 
-#%% Support functions
+# %% Support functions
 
-def _render_image(entry,
-                  detector_label_map,
-                  classification_label_map,
-                  confidence_threshold,
-                  classification_confidence_threshold,
-                  render_detections_only,
-                  preserve_path_structure,
-                  out_dir,
-                  images_dir,
-                  output_image_width,
-                  box_sort_order=None,
-                  category_names_to_blur=None):
+
+def _render_image(
+    entry,
+    detector_label_map,
+    classification_label_map,
+    confidence_threshold,
+    classification_confidence_threshold,
+    render_detections_only,
+    preserve_path_structure,
+    out_dir,
+    images_dir,
+    output_image_width,
+    box_sort_order=None,
+    category_names_to_blur=None,
+):
     """
     Internal function for rendering a single image.
     """
 
-    rendering_result = {'failed_image':False,'missing_image':False,
-                        'skipped_image':False,'annotated_image_path':None,
-                        'max_conf':None,'file':entry['file']}
+    rendering_result = {
+        "failed_image": False,
+        "missing_image": False,
+        "skipped_image": False,
+        "annotated_image_path": None,
+        "max_conf": None,
+        "file": entry["file"],
+    }
 
-    image_id = entry['file']
+    image_id = entry["file"]
 
-    if 'failure' in entry and entry['failure'] is not None:
-        rendering_result['failed_image'] = True
+    if "failure" in entry and entry["failure"] is not None:
+        rendering_result["failed_image"] = True
         return rendering_result
 
-    assert 'detections' in entry and entry['detections'] is not None
+    assert "detections" in entry and entry["detections"] is not None
 
     max_conf = get_max_conf(entry)
-    rendering_result['max_conf'] = max_conf
+    rendering_result["max_conf"] = max_conf
 
     if (max_conf < confidence_threshold) and render_detections_only:
-        rendering_result['skipped_image'] = True
+        rendering_result["skipped_image"] = True
         return rendering_result
 
     if images_dir is None:
         image_filename_in_abs = image_id
-        assert path_is_abs(image_filename_in_abs), \
-            'Absolute paths are required when no image base dir is supplied'
+        assert path_is_abs(
+            image_filename_in_abs
+        ), "Absolute paths are required when no image base dir is supplied"
     else:
-        assert not path_is_abs(image_id), \
-            'Relative paths are required when an image base dir is supplied'
+        assert not path_is_abs(
+            image_id
+        ), "Relative paths are required when an image base dir is supplied"
         image_filename_in_abs = os.path.join(images_dir, image_id)
     if not os.path.exists(image_filename_in_abs):
-        print(f'Image {image_id} not found')
-        rendering_result['missing_image'] = True
+        print(f"Image {image_id} not found")
+        rendering_result["missing_image"] = True
         return rendering_result
 
     # Load the image
@@ -94,18 +108,18 @@ def _render_image(entry,
     # Find categories we're supposed to blur
     category_ids_to_blur = []
     if category_names_to_blur is not None:
-        if isinstance(category_names_to_blur,str):
+        if isinstance(category_names_to_blur, str):
             category_names_to_blur = [category_names_to_blur]
         for category_id in detector_label_map:
             if detector_label_map[category_id] in category_names_to_blur:
                 category_ids_to_blur.append(category_id)
 
     detections_to_blur = []
-    for d in entry['detections']:
-        if d['conf'] >= confidence_threshold and d['category'] in category_ids_to_blur:
+    for d in entry["detections"]:
+        if d["conf"] >= confidence_threshold and d["category"] in category_ids_to_blur:
             detections_to_blur.append(d)
     if len(detections_to_blur) > 0:
-        blur_detections(image,detections_to_blur)
+        blur_detections(image, detections_to_blur)
 
     # Resize if necessary
     #
@@ -114,20 +128,31 @@ def _render_image(entry,
 
     # Find the detection with the highest confidence
     highest_conf_detection = None
-    if entry['detections']:
-        highest_conf_detection = max(entry['detections'], key=lambda x: x['conf'])
+    if entry["detections"]:
+        highest_conf_detection = max(entry["detections"], key=lambda x: x["conf"])
 
     # Generate labels for the highest confidence detection
     display_strs = []
-    if highest_conf_detection and highest_conf_detection['conf'] >= confidence_threshold:
-        detection_label = detector_label_map.get(highest_conf_detection['category'], highest_conf_detection['category'])
-        display_strs.append(f"{detection_label}: {round(highest_conf_detection['conf'] * 100)}%")
+    if (
+        highest_conf_detection
+        and highest_conf_detection["conf"] >= confidence_threshold
+    ):
+        detection_label = detector_label_map.get(
+            highest_conf_detection["category"], highest_conf_detection["category"]
+        )
+        display_strs.append(
+            f"{detection_label}: {round(highest_conf_detection['conf'] * 100)}%"
+        )
 
-        if 'classifications' in highest_conf_detection:
-            for class_cat, class_conf in highest_conf_detection['classifications']:
+        if "classifications" in highest_conf_detection:
+            for class_cat, class_conf in highest_conf_detection["classifications"]:
                 if class_conf >= classification_confidence_threshold:
-                    classification_label = classification_label_map.get(class_cat, class_cat)
-                    display_strs.append(f"  {classification_label}: {round(class_conf * 100)}%")
+                    classification_label = classification_label_map.get(
+                        class_cat, class_cat
+                    )
+                    display_strs.append(
+                        f"  {classification_label}: {round(class_conf * 100)}%"
+                    )
 
     # Draw labels on the top of the image
     if display_strs:
@@ -138,10 +163,13 @@ def _render_image(entry,
             text_size = draw.textbbox((0, 0), s, font=font)
             text_width = text_size[2] - text_size[0]
             text_height = text_size[3] - text_size[1]
-            
+
             # Add a background rectangle
-            draw.rectangle([5, y_offset, 5 + text_width + 10, y_offset + text_height + 10], fill='black')
-            draw.text((10, y_offset + 5), s, font=font, fill='white')
+            draw.rectangle(
+                [5, y_offset, 5 + text_width + 10, y_offset + text_height + 10],
+                fill="black",
+            )
+            draw.text((10, y_offset + 5), s, font=font, fill="white")
             y_offset += text_height + 15
 
     # The API for render_detection_bounding_boxes doesn't have an option to render
@@ -149,56 +177,64 @@ def _render_image(entry,
     # map is None).  So, to render boxes without any labels, we send the renderer
     # a copy of the detections list with classification results stripped out.
     detections_for_bbox_rendering = []
-    for d in entry['detections']:
+    for d in entry["detections"]:
         d_copy = d.copy()
-        if 'classifications' in d_copy:
-            del d_copy['classifications']
+        if "classifications" in d_copy:
+            del d_copy["classifications"]
         detections_for_bbox_rendering.append(d_copy)
-        
+
     vis_utils.render_detection_bounding_boxes(
-        detections_for_bbox_rendering, image,
+        detections_for_bbox_rendering,
+        image,
         label_map=None,  # Pass None to avoid drawing labels on boxes
         classification_label_map=classification_label_map,
         confidence_threshold=confidence_threshold,
         classification_confidence_threshold=classification_confidence_threshold,
-        box_sort_order=box_sort_order)
+        box_sort_order=box_sort_order,
+    )
 
     if not preserve_path_structure:
-        for char in ['/', '\\', ':']:
-            image_id = image_id.replace(char, '~')
-        annotated_img_path = os.path.join(out_dir, f'anno_{image_id}')
+        for char in ["/", "\\", ":"]:
+            image_id = image_id.replace(char, "~")
+        annotated_img_path = os.path.join(out_dir, f"anno_{image_id}")
     else:
-        assert not os.path.isabs(image_id), "Can't preserve paths when operating on absolute paths"
+        assert not os.path.isabs(
+            image_id
+        ), "Can't preserve paths when operating on absolute paths"
         annotated_img_path = os.path.join(out_dir, image_id)
-        os.makedirs(os.path.dirname(annotated_img_path),exist_ok=True)
+        os.makedirs(os.path.dirname(annotated_img_path), exist_ok=True)
 
     image.save(annotated_img_path)
-    rendering_result['annotated_image_path'] = annotated_img_path
+    rendering_result["annotated_image_path"] = annotated_img_path
 
     return rendering_result
+
 
 # ...def _render_image(...)
 
 
-#%% Main function
+# %% Main function
 
-def visualize_detector_output(detector_output_path,
-                              out_dir,
-                              images_dir=None,
-                              confidence_threshold=0.15,
-                              sample=-1,
-                              output_image_width=700,
-                              random_seed=None,
-                              render_detections_only=False,
-                              classification_confidence_threshold=0.1,
-                              html_output_file=None,
-                              html_output_options=None,
-                              preserve_path_structure=False,
-                              parallelize_rendering=False,
-                              parallelize_rendering_n_cores=10,
-                              parallelize_rendering_with_threads=True,
-                              box_sort_order=None,
-                              category_names_to_blur=None):
+
+def visualize_detector_output(
+    detector_output_path,
+    out_dir,
+    images_dir=None,
+    confidence_threshold=0.15,
+    sample=-1,
+    output_image_width=700,
+    random_seed=None,
+    render_detections_only=False,
+    classification_confidence_threshold=0.1,
+    html_output_file=None,
+    html_output_options=None,
+    preserve_path_structure=False,
+    parallelize_rendering=False,
+    parallelize_rendering_n_cores=10,
+    parallelize_rendering_with_threads=True,
+    box_sort_order=None,
+    category_names_to_blur=None,
+):
     """
     Draws bounding boxes on images given the output of a detector.
 
@@ -242,65 +278,71 @@ def visualize_detector_output(detector_output_path,
         list: list of paths to annotated images
     """
 
-    assert os.path.exists(detector_output_path), \
-        'Detector output file does not exist at {}'.format(detector_output_path)
+    assert os.path.exists(
+        detector_output_path
+    ), "Detector output file does not exist at {}".format(detector_output_path)
 
     if images_dir is not None:
-        assert os.path.isdir(images_dir), \
-            'Image folder {} is not available'.format(images_dir)
+        assert os.path.isdir(images_dir), "Image folder {} is not available".format(
+            images_dir
+        )
 
     os.makedirs(out_dir, exist_ok=True)
-
 
     ##%% Load detector output
 
     detector_output = load_md_or_speciesnet_file(detector_output_path)
 
-    images = detector_output['images']
+    images = detector_output["images"]
 
     if confidence_threshold is None:
-        confidence_threshold = get_typical_confidence_threshold_from_results(detector_output)
+        confidence_threshold = get_typical_confidence_threshold_from_results(
+            detector_output
+        )
 
-    assert confidence_threshold >= 0 and confidence_threshold <= 1, \
-        f'Confidence threshold {confidence_threshold} is invalid, must be in (0, 1).'
+    assert (
+        confidence_threshold >= 0 and confidence_threshold <= 1
+    ), f"Confidence threshold {confidence_threshold} is invalid, must be in (0, 1)."
 
-    if 'detection_categories' in detector_output:
-        detector_label_map = detector_output['detection_categories']
+    if "detection_categories" in detector_output:
+        detector_label_map = detector_output["detection_categories"]
     else:
         detector_label_map = DEFAULT_DETECTOR_LABEL_MAP
 
     num_images = len(images)
-    print(f'Detector output file contains {num_images} entries.')
+    print(f"Detector output file contains {num_images} entries.")
 
     if (sample > 0) and (num_images > sample):
 
         if random_seed is not None:
-            images = sorted(images, key=lambda x: x['file'])
+            images = sorted(images, key=lambda x: x["file"])
             random.seed(random_seed)
 
         random.shuffle(images)
-        images = sorted(images[:sample], key=lambda x: x['file'])
-        print(f'Sampled {len(images)} entries from the detector output file.')
-
+        images = sorted(images[:sample], key=lambda x: x["file"])
+        print(f"Sampled {len(images)} entries from the detector output file.")
 
     ##%% Load images, annotate them and save
 
-    print('Rendering detections above a confidence threshold of {}'.format(
-        confidence_threshold))
+    print(
+        "Rendering detections above a confidence threshold of {}".format(
+            confidence_threshold
+        )
+    )
 
     classification_label_map = None
 
-    if 'classification_categories' in detector_output:
-        classification_label_map = detector_output['classification_categories']
+    if "classification_categories" in detector_output:
+        classification_label_map = detector_output["classification_categories"]
 
     rendering_results = []
 
     if parallelize_rendering:
 
         if parallelize_rendering_with_threads:
-            worker_string = 'threads'
+            worker_string = "threads"
         else:
-            worker_string = 'processes'
+            worker_string = "processes"
 
         pool = None
         try:
@@ -314,21 +356,33 @@ def visualize_detector_output(detector_output_path,
                     pool = ThreadPool(parallelize_rendering_n_cores)
                 else:
                     pool = Pool(parallelize_rendering_n_cores)
-                print('Rendering images with {} {}'.format(parallelize_rendering_n_cores,
-                                                           worker_string))
-            rendering_results = list(tqdm(pool.imap(
-                                     partial(_render_image,detector_label_map=detector_label_map,
-                                             classification_label_map=classification_label_map,
-                                             confidence_threshold=confidence_threshold,
-                                             classification_confidence_threshold=classification_confidence_threshold,
-                                             render_detections_only=render_detections_only,
-                                             preserve_path_structure=preserve_path_structure,
-                                             out_dir=out_dir,
-                                             images_dir=images_dir,
-                                             output_image_width=output_image_width,
-                                             box_sort_order=box_sort_order,
-                                             category_names_to_blur=category_names_to_blur),
-                                     images), total=len(images)))
+                print(
+                    "Rendering images with {} {}".format(
+                        parallelize_rendering_n_cores, worker_string
+                    )
+                )
+            rendering_results = list(
+                tqdm(
+                    pool.imap(
+                        partial(
+                            _render_image,
+                            detector_label_map=detector_label_map,
+                            classification_label_map=classification_label_map,
+                            confidence_threshold=confidence_threshold,
+                            classification_confidence_threshold=classification_confidence_threshold,
+                            render_detections_only=render_detections_only,
+                            preserve_path_structure=preserve_path_structure,
+                            out_dir=out_dir,
+                            images_dir=images_dir,
+                            output_image_width=output_image_width,
+                            box_sort_order=box_sort_order,
+                            category_names_to_blur=category_names_to_blur,
+                        ),
+                        images,
+                    ),
+                    total=len(images),
+                )
+            )
         finally:
             if pool is not None:
                 pool.close()
@@ -339,27 +393,43 @@ def visualize_detector_output(detector_output_path,
 
         for entry in tqdm(images):
 
-            rendering_result = _render_image(entry,detector_label_map,classification_label_map,
-                                            confidence_threshold,classification_confidence_threshold,
-                                            render_detections_only,preserve_path_structure,out_dir,
-                                            images_dir,output_image_width,box_sort_order,
-                                            category_names_to_blur=category_names_to_blur)
+            rendering_result = _render_image(
+                entry,
+                detector_label_map,
+                classification_label_map,
+                confidence_threshold,
+                classification_confidence_threshold,
+                render_detections_only,
+                preserve_path_structure,
+                out_dir,
+                images_dir,
+                output_image_width,
+                box_sort_order,
+                category_names_to_blur=category_names_to_blur,
+            )
             rendering_results.append(rendering_result)
 
     # ...for each image
 
-    failed_images = [r for r in rendering_results if r['failed_image']]
-    missing_images = [r for r in rendering_results if r['missing_image']]
-    skipped_images = [r for r in rendering_results if r['skipped_image']]
+    failed_images = [r for r in rendering_results if r["failed_image"]]
+    missing_images = [r for r in rendering_results if r["missing_image"]]
+    skipped_images = [r for r in rendering_results if r["skipped_image"]]
 
-    print('Skipped {} failed images (of {})'.format(len(failed_images),len(images)))
-    print('Skipped {} missing images (of {})'.format(len(missing_images),len(images)))
-    print('Skipped {} below-threshold images (of {})'.format(len(skipped_images),len(images)))
+    print("Skipped {} failed images (of {})".format(len(failed_images), len(images)))
+    print("Skipped {} missing images (of {})".format(len(missing_images), len(images)))
+    print(
+        "Skipped {} below-threshold images (of {})".format(
+            len(skipped_images), len(images)
+        )
+    )
 
-    print(f'Rendered detection results to {out_dir}')
+    print(f"Rendered detection results to {out_dir}")
 
-    annotated_image_paths = [r['annotated_image_path'] for r in rendering_results if \
-                             r['annotated_image_path'] is not None]
+    annotated_image_paths = [
+        r["annotated_image_path"]
+        for r in rendering_results
+        if r["annotated_image_path"] is not None
+    ]
 
     if html_output_file is not None:
 
@@ -369,80 +439,121 @@ def visualize_detector_output(detector_output_path,
 
         for r in rendering_results:
             d = {}
-            if r['annotated_image_path'] is None:
-                assert r['failed_image'] or r['missing_image'] or r['skipped_image']
+            if r["annotated_image_path"] is None:
+                assert r["failed_image"] or r["missing_image"] or r["skipped_image"]
                 continue
-            annotated_image_path_relative = os.path.relpath(r['annotated_image_path'],html_dir)
-            d['filename'] = annotated_image_path_relative
-            d['textStyle'] = \
-             'font-family:verdana,arial,calibri;font-size:80%;' + \
-                 'text-align:left;margin-top:20;margin-bottom:5'
-            d['title'] = '{} (max conf: {})'.format(r['file'],r['max_conf'])
+            annotated_image_path_relative = os.path.relpath(
+                r["annotated_image_path"], html_dir
+            )
+            d["filename"] = annotated_image_path_relative
+            d["textStyle"] = (
+                "font-family:verdana,arial,calibri;font-size:80%;"
+                + "text-align:left;margin-top:20;margin-bottom:5"
+            )
+            d["title"] = "{} (max conf: {})".format(r["file"], r["max_conf"])
             html_image_info.append(d)
 
-        _ = write_html_image_list.write_html_image_list(html_output_file,html_image_info,
-                                                    options=html_output_options)
+        _ = write_html_image_list.write_html_image_list(
+            html_output_file, html_image_info, options=html_output_options
+        )
 
     return annotated_image_paths
+
 
 # ...def visualize_detector_output(...)
 
 
-#%% Command-line driver
+# %% Command-line driver
 
-def main(): # noqa
+
+def main():  # noqa
 
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description='Annotate the bounding boxes predicted by a detector above '
-                    'some confidence threshold, and save the annotated images.')
+        description="Annotate the bounding boxes predicted by a detector above "
+        "some confidence threshold, and save the annotated images.",
+    )
     parser.add_argument(
-        'detector_output_path', type=str,
-        help='Path to json output file of the detector')
+        "detector_output_path",
+        type=str,
+        help="Path to json output file of the detector",
+    )
     parser.add_argument(
-        'out_dir', type=str,
-        help='Path to directory where the annotated images will be saved. '
-             'The directory will be created if it does not exist.')
+        "out_dir",
+        type=str,
+        help="Path to directory where the annotated images will be saved. "
+        "The directory will be created if it does not exist.",
+    )
     parser.add_argument(
-        '--confidence', type=float, default=0.15,
-        help='Value between 0 and 1, indicating the confidence threshold '
-             'above which to visualize bounding boxes')
+        "--confidence",
+        type=float,
+        default=0.15,
+        help="Value between 0 and 1, indicating the confidence threshold "
+        "above which to visualize bounding boxes",
+    )
     parser.add_argument(
-        '--images_dir', type=str, default=None,
-        help='Path to a local directory where images are stored. This '
-             'serves as the root directory for image paths in '
-             'detector_output_path.  Omit if image paths are absolute.')
+        "--images_dir",
+        type=str,
+        default=None,
+        help="Path to a local directory where images are stored. This "
+        "serves as the root directory for image paths in "
+        "detector_output_path.  Omit if image paths are absolute.",
+    )
     parser.add_argument(
-        '--sample', type=int, default=-1,
-        help='Number of images to be annotated and rendered. Set to -1 '
-             '(default) to annotate all images in the detector output file. '
-             'There may be fewer images if some are not found in images_dir.')
+        "--sample",
+        type=int,
+        default=-1,
+        help="Number of images to be annotated and rendered. Set to -1 "
+        "(default) to annotate all images in the detector output file. "
+        "There may be fewer images if some are not found in images_dir.",
+    )
     parser.add_argument(
-        '--output_image_width', type=int, default=700,
-        help='Integer, desired width in pixels of the output annotated images. '
-             'Use -1 to not resize. Default: 700.')
+        "--output_image_width",
+        type=int,
+        default=700,
+        help="Integer, desired width in pixels of the output annotated images. "
+        "Use -1 to not resize. Default: 700.",
+    )
     parser.add_argument(
-        '--random_seed', type=int, default=None,
-        help='Integer, for deterministic order of image sampling')
+        "--random_seed",
+        type=int,
+        default=None,
+        help="Integer, for deterministic order of image sampling",
+    )
     parser.add_argument(
-        '--html_output_file', type=str, default=None,
-        help='Filename to which we should write an HTML image index (off by default)')
+        "--html_output_file",
+        type=str,
+        default=None,
+        help="Filename to which we should write an HTML image index (off by default)",
+    )
     parser.add_argument(
-        '--open_html_output_file', action='store_true',
-        help='Open the .html output file when done')
+        "--open_html_output_file",
+        action="store_true",
+        help="Open the .html output file when done",
+    )
     parser.add_argument(
-        '--detections_only', action='store_true',
-        help='Only render images with above-threshold detections (by default, '
-             'both empty and non-empty images are rendered).')
+        "--detections_only",
+        action="store_true",
+        help="Only render images with above-threshold detections (by default, "
+        "both empty and non-empty images are rendered).",
+    )
     parser.add_argument(
-        '--preserve_path_structure', action='store_true',
-        help='Preserve relative image paths (otherwise flattens and assigns unique file names)')
+        "--preserve_path_structure",
+        action="store_true",
+        help="Preserve relative image paths (otherwise flattens and assigns unique file names)",
+    )
     parser.add_argument(
-        '--category_names_to_blur', default=None, type=str,
-        help='Comma-separated list of category names to blur (or a single category name, typically "person")')
+        "--category_names_to_blur",
+        default=None,
+        type=str,
+        help='Comma-separated list of category names to blur (or a single category name, typically "person")',
+    )
     parser.add_argument(
-        '--classification_confidence', type=float, default=0.1,
-        help='If classification results are present, render results above this threshold')
+        "--classification_confidence",
+        type=float,
+        default=0.1,
+        help="If classification results are present, render results above this threshold",
+    )
 
     if len(sys.argv[1:]) == 0:
         parser.print_help()
@@ -452,7 +563,7 @@ def main(): # noqa
 
     category_names_to_blur = args.category_names_to_blur
     if category_names_to_blur is not None:
-        category_names_to_blur = category_names_to_blur.split(',')
+        category_names_to_blur = category_names_to_blur.split(",")
 
     visualize_detector_output(
         detector_output_path=args.detector_output_path,
@@ -466,55 +577,61 @@ def main(): # noqa
         classification_confidence_threshold=args.classification_confidence,
         preserve_path_structure=args.preserve_path_structure,
         html_output_file=args.html_output_file,
-        category_names_to_blur=category_names_to_blur)
+        category_names_to_blur=category_names_to_blur,
+    )
 
     if args.html_output_file is not None and args.open_html_output_file:
         from megadetector.utils.path_utils import open_file
+
         open_file(args.html_output_file)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
 
 
-#%% Interactive driver
+# %% Interactive driver
 
 if False:
 
     pass
 
-    #%%
+    # %%
 
-    detector_output_path = os.path.expanduser('detections.json')
-    out_dir = r'g:\temp\preview'
-    images_dir = r'g:\camera_traps\camera_trap_images'
+    detector_output_path = os.path.expanduser("detections.json")
+    out_dir = r"g:\temp\preview"
+    images_dir = r"g:\camera_traps\camera_trap_images"
     confidence_threshold = 0.15
     sample = 50
     output_image_width = 700
     random_seed = 1
     render_detections_only = True
     classification_confidence_threshold = 0.1
-    html_output_file = os.path.join(out_dir,'index.html')
+    html_output_file = os.path.join(out_dir, "index.html")
     html_output_options = None
     preserve_path_structure = False
     parallelize_rendering = True
     parallelize_rendering_n_cores = 10
     parallelize_rendering_with_threads = False
 
-    _ = visualize_detector_output(detector_output_path,
-                              out_dir,
-                              images_dir,
-                              confidence_threshold,
-                              sample,
-                              output_image_width,
-                              random_seed,
-                              render_detections_only,
-                              classification_confidence_threshold,
-                              html_output_file,
-                              html_output_options,
-                              preserve_path_structure,
-                              parallelize_rendering,
-                              parallelize_rendering_n_cores,
-                              parallelize_rendering_with_threads)
+    _ = visualize_detector_output(
+        detector_output_path,
+        out_dir,
+        images_dir,
+        confidence_threshold,
+        sample,
+        output_image_width,
+        random_seed,
+        render_detections_only,
+        classification_confidence_threshold,
+        html_output_file,
+        html_output_options,
+        preserve_path_structure,
+        parallelize_rendering,
+        parallelize_rendering_n_cores,
+        parallelize_rendering_with_threads,
+    )
 
     from megadetector.utils.path_utils import open_file
+
     open_file(html_output_file)

@@ -239,6 +239,12 @@ class PostProcessingOptions:
         #: classification categories?
         self.include_classification_category_report = True
 
+        #: If True, separate animal detections into "cetartiodactyla" and "other" based on classification
+        self.separate_animals_by_classification = False
+
+        #: Classification string to search for when separating animals (default: "cetartiodactyla")
+        self.animal_classification_keyword = "cetartiodactyla"
+
     # ...__init__()
 
 
@@ -389,6 +395,75 @@ def _mark_detection_status(
 
 
 # ..._mark_detection_status()
+
+
+def _has_cetartiodactyla_classification(
+    detections, classification_categories, keyword="cetartiodactyla"
+):
+    """
+    Check if any detection in the list has a classification containing the specified keyword.
+
+    Args:
+        detections: List of detection dictionaries
+        classification_categories: Dictionary mapping classification IDs to names
+        keyword: String to search for in classification names (default: "cetartiodactyla")
+
+    Returns:
+        bool: True if any detection has a classification containing the keyword
+    """
+    if not classification_categories:
+        return False
+
+    for det in detections:
+        if "classifications" in det and len(det["classifications"]) > 0:
+            for class_id, class_conf in det["classifications"]:
+                if class_id in classification_categories:
+                    class_name = classification_categories[class_id]
+                    if keyword.lower() in class_name.lower():
+                        return True
+    return False
+
+
+def _has_cetartiodactyla_classification_with_full_taxonomy(
+    detections,
+    classification_categories,
+    classification_category_descriptions,
+    keyword="cetartiodactyla",
+):
+    """
+    Check if any detection in the list has a classification containing the specified keyword.
+    This version looks in the full taxonomy descriptions, not just the short classification names.
+
+    Args:
+        detections: List of detection dictionaries
+        classification_categories: Dictionary mapping classification IDs to short names
+        classification_category_descriptions: Dictionary mapping classification IDs to full taxonomy strings
+        keyword: String to search for in classification names (default: "cetartiodactyla")
+
+    Returns:
+        bool: True if any detection has a classification containing the keyword
+    """
+    if not classification_categories:
+        return False
+
+    for det in detections:
+        if "classifications" in det and len(det["classifications"]) > 0:
+            for class_id, class_conf in det["classifications"]:
+                if class_id in classification_categories:
+                    # Look in the full taxonomy description if available
+                    if (
+                        classification_category_descriptions
+                        and class_id in classification_category_descriptions
+                    ):
+                        full_taxonomy = classification_category_descriptions[class_id]
+                        if keyword.lower() in full_taxonomy.lower():
+                            return True
+                    # Fallback to short name if full taxonomy not available
+                    else:
+                        class_name = classification_categories[class_id]
+                        if keyword.lower() in class_name.lower():
+                            return True
+    return False
 
 
 def is_sas_url(s) -> bool:
@@ -811,6 +886,7 @@ def _render_image_no_gt(
     detection_categories_to_results_name,
     detection_categories,
     classification_categories,
+    classification_category_descriptions,
     options,
 ):
     r"""
@@ -866,7 +942,18 @@ def _render_image_no_gt(
             detection_status = DetectionStatus.DS_NEGATIVE
 
     if detection_status == DetectionStatus.DS_POSITIVE:
-        if options.separate_detections_by_category:
+        if options.separate_animals_by_classification and classification_categories:
+            # Check if any detection has cetartiodactyla classification
+            if _has_cetartiodactyla_classification_with_full_taxonomy(
+                detections,
+                classification_categories,
+                classification_category_descriptions,
+                options.animal_classification_keyword,
+            ):
+                res = "detections_cetartiodactyla"
+            else:
+                res = "detections_other"
+        elif options.separate_detections_by_category:
             positive_categories = tuple(
                 _get_positive_categories(detections, options, detection_categories)
             )
@@ -879,9 +966,8 @@ def _render_image_no_gt(
             res = detection_categories_to_results_name[positive_categories]
         else:
             res = "detections"
-
     elif detection_status == DetectionStatus.DS_NEGATIVE:
-        res = "non_detections"
+        return None
     else:
         assert detection_status == DetectionStatus.DS_ALMOST
         res = "almost_detections"
@@ -1252,6 +1338,11 @@ def process_batch_results(options):
         classification_categories = {
             k.lower(): v.lower() for k, v in classification_categories.items()
         }
+
+    # Load classification category descriptions (full taxonomy strings)
+    classification_category_descriptions = other_fields.get(
+        "classification_category_descriptions", {}
+    )
 
     # Count detections and almost-detections for reporting purposes
     n_positives = 0
@@ -1870,11 +1961,13 @@ def process_batch_results(options):
         # combinations (e.g. "animal_vehicle")
         detection_categories_to_category_count = {}
 
-        # For the creation of a "non-detections" category
-        images_html["non_detections"]
-        detection_categories_to_category_count["non_detections"] = 0
-
-        if not options.separate_detections_by_category:
+        if options.separate_animals_by_classification and classification_categories:
+            # Add the new animal classification categories
+            images_html["detections_cetartiodactyla"]
+            images_html["detections_other"]
+            detection_categories_to_category_count["detections_cetartiodactyla"] = 1
+            detection_categories_to_category_count["detections_other"] = 1
+        elif not options.separate_detections_by_category:
             # For the creation of a "detections" category
             images_html["detections"]
             detection_categories_to_category_count["detections"] = 0
@@ -1977,6 +2070,7 @@ def process_batch_results(options):
                                 detection_categories_to_results_name=detection_categories_to_results_name,
                                 detection_categories=detection_categories,
                                 classification_categories=classification_categories,
+                                classification_category_descriptions=classification_category_descriptions,
                                 options=options,
                             ),
                             files_to_render,
@@ -1996,6 +2090,7 @@ def process_batch_results(options):
                     detection_categories_to_results_name,
                     detection_categories,
                     classification_categories,
+                    classification_category_descriptions,
                     options=options,
                 )
                 rendering_results.append(rendering_result)
@@ -2370,6 +2465,17 @@ def main():  # noqa
         type=int,
         default=None,
         help="Maximum number of images to put on a single HTML page",
+    )
+    parser.add_argument(
+        "--separate_animals_by_classification",
+        action="store_true",
+        help="Separate animal detections into 'cetartiodactyla' and 'other' based on classification results",
+    )
+    parser.add_argument(
+        "--animal_classification_keyword",
+        type=str,
+        default="cetartiodactyla",
+        help="Keyword to search for in classification names when separating animals (default: cetartiodactyla)",
     )
 
     if len(sys.argv[1:]) == 0:

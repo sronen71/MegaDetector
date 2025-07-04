@@ -955,6 +955,14 @@ def _render_image_no_gt(
             ):
                 res = "detections_cetartiodactyla"
             else:
+                # Exclude 'human' and 'blank' at the final smoothed level from 'other'
+                smoothed_pred = file_info.get("smoothed_class") or file_info.get(
+                    "prediction"
+                )
+                if smoothed_pred:
+                    common_name = smoothed_pred.split(";")[-1].strip().lower()
+                    if common_name in ("human", "blank"):
+                        return None
                 res = "detections_other"
         elif options.separate_detections_by_category:
             positive_categories = tuple(
@@ -1154,6 +1162,14 @@ def _render_image_with_gt(
         res = "fn"
     else:
         res = "tn"
+
+    # Exclude 'human' and 'blank' at the final smoothed level from 'other'
+    if res == "detections_other":
+        smoothed_pred = file_info.get("smoothed_class") or file_info.get("prediction")
+        if smoothed_pred:
+            common_name = smoothed_pred.split(";")[-1].strip().lower()
+            if common_name in ("human", "blank"):
+                return None
 
     display_name = "<b>Result type</b>: {}, <b>Presence</b>: {}, <b>Class</b>: {}, <b>Max conf</b>: {:0.3f}%, <b>Image</b>: {}".format(  # noqa
         res.upper(),
@@ -2260,6 +2276,10 @@ def process_batch_results(options):
 
             # Add links to all available classes
             class_names = sorted(classification_categories.values())
+            # Exclude 'human' and 'blank' from class_names
+            class_names = [
+                c for c in class_names if c.lower() not in ("human", "blank")
+            ]
             if "class_unreliable" in images_html.keys():
                 class_names.append("unreliable")
 
@@ -2275,7 +2295,7 @@ def process_batch_results(options):
             for cname in class_names:
                 ccount = len(images_html["class_{}".format(cname)])
                 if ccount > 0:
-                    index_page += '<a href="class_{}.html">{}</a> ({})<br/>\n'.format(
+                    index_page += '<a href="class_{}.html">{}</a> ({})<br/>'.format(
                         cname, cname.lower(), ccount
                     )
             index_page += "</div>\n"

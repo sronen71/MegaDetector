@@ -68,6 +68,7 @@ def write_sequence_max_detection_csv(
             if det.get("category") == "1"
             and det.get("conf", 0.0) >= confidence_threshold
         ]
+        # Exclude if there are any human detections in this image
         if not animal_detections:
             continue
         file_name = max_img["file"]
@@ -84,6 +85,9 @@ def write_sequence_max_detection_csv(
         # Get species from 'prediction' field (smoothed, preferred)
         pred = max_img.get("smoothed_class", "")
         species = pred.split(";")[-1]
+        # Exclude if the species is 'human' (case-insensitive)
+        if species in ["human", "blank"]:
+            continue
 
         # Build clickable link (HTML <a> tag)
         # For CSV, just use the plain file name

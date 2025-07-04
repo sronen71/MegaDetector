@@ -65,6 +65,7 @@ from megadetector.detection.run_detector import (
 )
 from megadetector.postprocessing.sequence_max_detection_csv import (
     write_sequence_max_detection_csv,
+    sequence_max_csv_to_html_table,
 )
 
 warnings.filterwarnings("ignore", "(Possibly )?corrupt EXIF data", UserWarning)
@@ -2376,6 +2377,27 @@ def process_batch_results(options):
             options.image_base_dir,
             confidence_threshold=animal_threshold,
         )
+        # Use the new function to get the HTML table
+        csv_path = os.path.join(output_dir, "sequence_max_detections.csv")
+        table_html = sequence_max_csv_to_html_table(
+            csv_path, image_base_dir=options.image_base_dir
+        )
+        # Insert the table before closing </body></html>
+        if table_html:
+            if output_html_file and os.path.exists(output_html_file):
+                with open(
+                    output_html_file, "r", encoding=options.output_html_encoding
+                ) as f:
+                    html = f.read()
+                # Insert before </body>
+                if "</body>" in html:
+                    html = html.replace("</body>", table_html + "\n</body>")
+                else:
+                    html += table_html
+                with open(
+                    output_html_file, "w", encoding=options.output_html_encoding
+                ) as f:
+                    f.write(html)
     return ppresults
 
 

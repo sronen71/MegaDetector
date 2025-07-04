@@ -1,6 +1,7 @@
 import os
 import csv
 from collections import defaultdict
+import datetime
 
 # Copied from postprocess_batch_results.py
 
@@ -45,7 +46,7 @@ def write_sequence_max_detection_csv(
 ):
     """
     For each sequence (seq_id), find the image with the largest number of detections.
-    Write a CSV with columns: file_name, date, time, seq_id, species, max_count.
+    Write a CSV with columns: file_name, date, time, seq_id, species, max_count, start_time, end_time, duration.
     file_name is a clickable link to the original image (HTML <a> tag).
     """
     images = md_results["images"]
@@ -89,18 +90,103 @@ def write_sequence_max_detection_csv(
         if species in ["human", "blank"]:
             continue
 
-        # Build clickable link (HTML <a> tag)
-        # For CSV, just use the plain file name
-        # if is_sas_url(image_base_dir):
-        #     link = relative_sas_url(image_base_dir, file_name)
-        # else:
-        #     link = os.path.join(image_base_dir, file_name)
-        # file_link = f'<a href="{link}">{file_name}</a>'
-        rows.append([file_name, date, time, seq_id, species, max_count])
+        # --- New: Compute start_time, end_time, duration for the sequence ---
+        datetimes = []
+        for im in group:
+            dt_str = im.get("datetime", "")
+            if dt_str and "T" in dt_str:
+                dt_base = dt_str.split(".")[0]  # Remove microseconds if present
+                try:
+                    dt_obj = datetime.datetime.strptime(dt_base, "%Y-%m-%dT%H:%M:%S")
+                    datetimes.append(dt_obj)
+                except Exception:
+                    pass
+        if datetimes:
+            start_time = min(datetimes)
+            end_time = max(datetimes)
+            duration_td = end_time - start_time
+            duration_seconds = int(duration_td.total_seconds())
+            start_time_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
+            end_time_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            start_time_str = end_time_str = ""
+            duration_seconds = ""
+        # ---------------------------------------------------------------
+
+        rows.append(
+            [
+                file_name,
+                date,
+                time,
+                seq_id,
+                species,
+                max_count,
+                start_time_str,
+                end_time_str,
+                duration_seconds,
+            ]
+        )
     # Write CSV
     csv_path = os.path.join(output_dir, csv_filename)
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["file_name", "date", "time", "seq_id", "species", "max_count"])
+        writer.writerow(
+            [
+                "file_name",
+                "date",
+                "time",
+                "seq_id",
+                "species",
+                "max_count",
+                "start_time",
+                "end_time",
+                "duration_seconds",
+            ]
+        )
         writer.writerows(rows)
     print(f"Wrote sequence max detection CSV to {csv_path}")
+
+
+def sequence_max_csv_to_html_table(csv_path, image_base_dir=None):
+    """
+    Reads the sequence max detection CSV and returns an HTML table string.
+    Returns an empty string if the file does not exist or is empty.
+    If image_base_dir is provided, makes file names clickable links.
+    """
+    if not os.path.exists(csv_path):
+        return ""
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        rows = list(reader)
+    if not rows:
+        return ""
+    table_html = (
+        "<h3>Sequence Max Detection Table</h3>"
+        '<div class="contentdiv">'
+        '<table border="1" style="border-collapse:collapse;">'
+        "<tr>" + "".join(f"<th>{cell}</th>" for cell in rows[0]) + "</tr>"
+    )
+    # Find the file_name column index
+    file_col_idx = 0
+    for i, col in enumerate(rows[0]):
+        if col.strip().lower() == "file_name":
+            file_col_idx = i
+            break
+    for row in rows[1:]:
+        table_html += "<tr>"
+        for j, cell in enumerate(row):
+            if j == file_col_idx and image_base_dir is not None:
+                # Build the link
+                file_name = cell
+                link = None
+                if is_sas_url(image_base_dir):
+                    link = relative_sas_url(image_base_dir, file_name)
+                else:
+                    link = os.path.join(image_base_dir, file_name)
+                cell_html = f'<a href="{link}">{file_name}</a>'
+            else:
+                cell_html = cell
+            table_html += f"<td>{cell_html}</td>"
+        table_html += "</tr>"
+    table_html += "</table></div>"
+    return table_html

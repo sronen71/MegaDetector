@@ -63,6 +63,9 @@ from megadetector.postprocessing.load_api_results import load_api_results
 from megadetector.detection.run_detector import (
     get_typical_confidence_threshold_from_results,
 )
+from megadetector.postprocessing.sequence_max_detection_csv import (
+    write_sequence_max_detection_csv,
+)
 
 warnings.filterwarnings("ignore", "(Possibly )?corrupt EXIF data", UserWarning)
 
@@ -2141,11 +2144,13 @@ def process_batch_results(options):
             total_images += v
 
         if total_images != image_count:
-            print(
-                "Warning, missing images: image_count is {}, total_images is {}".format(
-                    total_images, image_count
-                )
-            )
+            # Suppressed: filtering may cause this and is expected
+            # print(
+            #     "Warning, missing images: image_count is {}, total_images is {}".format(
+            #         total_images, image_count
+            #     )
+            # )
+            pass
 
         almost_detection_string = ""
         if options.include_almost_detections:
@@ -2251,13 +2256,6 @@ def process_batch_results(options):
         if has_classification_info:
 
             index_page += "<h3>Species classification results</h3>"
-            index_page += (
-                "<p>The same image might appear under multiple classes "
-                + "if multiple species were detected.</p>\n"
-            )
-            index_page += '<p>Classifications with confidence less than {:.1%} confidence are considered "unreliable".</p>\n'.format(
-                options.classification_confidence_threshold
-            )
             index_page += '<div class="contentdiv">\n'
 
             # Add links to all available classes
@@ -2344,6 +2342,20 @@ def process_batch_results(options):
     # ...if we do/don't have ground truth
 
     ppresults.output_html_file = output_html_file
+    md_results = load_md_or_speciesnet_file(options.md_results_file)
+    if any("seq_id" in im for im in md_results["images"]):
+        # Use the same threshold for animal detections as for plotting
+        animal_threshold = options.confidence_threshold
+        if isinstance(animal_threshold, dict):
+            animal_threshold = animal_threshold.get(
+                "animal", animal_threshold.get("1", 0.0)
+            )
+        write_sequence_max_detection_csv(
+            md_results,
+            output_dir,
+            options.image_base_dir,
+            confidence_threshold=animal_threshold,
+        )
     return ppresults
 
 

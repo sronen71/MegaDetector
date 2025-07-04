@@ -40,6 +40,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import humanfriendly
 import pandas as pd
+from PIL import ImageFont, ImageDraw
 
 from sklearn.metrics import (
     precision_recall_curve,
@@ -540,11 +541,71 @@ def _render_bounding_boxes(
                         )
                     )
 
+            # Find the detection with the highest confidence
+            highest_conf_detection = None
+            if detections:
+                highest_conf_detection = max(detections, key=lambda x: x["conf"])
+
+            # Generate labels for the highest confidence detection
+            display_strs = []
+            if (
+                highest_conf_detection
+                and highest_conf_detection["conf"] >= rendering_confidence_threshold
+            ):
+                detection_label = detection_categories.get(
+                    highest_conf_detection["category"],
+                    highest_conf_detection["category"],
+                )
+                display_strs.append(
+                    f"{detection_label}: {round(highest_conf_detection['conf'] * 100)}%"
+                )
+
+                if "classifications" in highest_conf_detection:
+                    for class_cat, class_conf in highest_conf_detection[
+                        "classifications"
+                    ]:
+                        if class_conf >= options.classification_confidence_threshold:
+                            classification_label = classification_categories.get(
+                                class_cat, class_cat
+                            )
+                            display_strs.append(
+                                f"  {classification_label}: {round(class_conf * 100)}%"
+                            )
+
+            # Draw labels on the top of the image
+            if display_strs:
+                font = ImageFont.load_default()
+                draw = ImageDraw.Draw(image)
+                y_offset = 10
+                for s in display_strs:
+                    text_size = draw.textbbox((0, 0), s, font=font)
+                    text_width = text_size[2] - text_size[0]
+                    text_height = text_size[3] - text_size[1]
+
+                    # Add a background rectangle
+                    draw.rectangle(
+                        [5, y_offset, 5 + text_width + 10, y_offset + text_height + 10],
+                        fill="black",
+                    )
+                    draw.text((10, y_offset + 5), s, font=font, fill="white")
+                    y_offset += text_height + 15
+
+            # The API for render_detection_bounding_boxes doesn't have an option to render
+            # boxes without classification labels (it renders classification IDs if the label
+            # map is None).  So, to render boxes without any labels, we send the renderer
+            # a copy of the detections list with classification results stripped out.
+            detections_for_bbox_rendering = []
+            for d in detections:
+                d_copy = d.copy()
+                if "classifications" in d_copy:
+                    del d_copy["classifications"]
+                detections_for_bbox_rendering.append(d_copy)
+
             # Render detection boxes
             vis_utils.render_detection_bounding_boxes(
-                detections,
+                detections_for_bbox_rendering,
                 image,
-                label_map=detection_categories,
+                label_map=None,  # Pass None to avoid drawing labels on boxes
                 classification_label_map=classification_categories,
                 confidence_threshold=rendering_confidence_threshold,
                 classification_confidence_threshold=options.classification_confidence_threshold,

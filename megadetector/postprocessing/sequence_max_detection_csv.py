@@ -40,9 +40,9 @@ def relative_sas_url(folder_url, relative_path):
 def write_sequence_max_detection_csv(
     md_results,
     output_dir,
-    image_base_dir,
     csv_filename="sequence_max_detections.csv",
     confidence_threshold=0.0,
+    include_all=False,
 ):
     """
     For each sequence (seq_id), find the image with the largest number of detections.
@@ -59,6 +59,17 @@ def write_sequence_max_detection_csv(
 
     rows = []
     for seq_id, group in seq_to_images.items():
+        # Skip this sequence if the top detection in any image is a person
+        discard_sequence = False
+        for im in group:
+            detections = im.get("detections", [])
+            if detections:
+                top_det = max(detections, key=lambda d: d.get("conf", 0.0))
+                if top_det.get("category") == "2":
+                    discard_sequence = True
+                    break
+        if discard_sequence:
+            continue
         # Find image with max detections (using all detections, but count only those above threshold)
         max_img = max(group, key=lambda im: len(im.get("detections", [])))
         detections = max_img.get("detections", [])
@@ -87,7 +98,8 @@ def write_sequence_max_detection_csv(
         pred = max_img.get("smoothed_class", "")
         species = pred.split(";")[-1]
         # Exclude if the species is 'human' (case-insensitive)
-        if species in ["human", "blank"]:
+        excluding = {"human", "blank"}
+        if species in excluding and not include_all:
             continue
 
         # --- New: Compute start_time, end_time, duration for the sequence ---

@@ -962,7 +962,7 @@ def _render_image_no_gt(
                 )
                 if smoothed_pred:
                     common_name = smoothed_pred.split(";")[-1].strip().lower()
-                    if common_name in ("human", "blank"):
+                    if (not options.include_all) and common_name in ("human", "blank"):
                         return None
                 res = "detections_other"
         elif options.separate_detections_by_category:
@@ -1169,7 +1169,7 @@ def _render_image_with_gt(
         smoothed_pred = file_info.get("smoothed_class") or file_info.get("prediction")
         if smoothed_pred:
             common_name = smoothed_pred.split(";")[-1].strip().lower()
-            if common_name in ("human", "blank"):
+            if (not options.include_all) and common_name in ("human", "blank"):
                 return None
 
     display_name = "<b>Result type</b>: {}, <b>Presence</b>: {}, <b>Class</b>: {}, <b>Max conf</b>: {:0.3f}%, <b>Image</b>: {}".format(  # noqa
@@ -2278,9 +2278,10 @@ def process_batch_results(options):
             # Add links to all available classes
             class_names = sorted(classification_categories.values())
             # Exclude 'human' and 'blank' from class_names
-            class_names = [
-                c for c in class_names if c.lower() not in ("human", "blank")
-            ]
+            if not options.include_all:
+                class_names = [
+                    c for c in class_names if c.lower() not in ("human", "blank")
+                ]
             if "class_unreliable" in images_html.keys():
                 class_names.append("unreliable")
 
@@ -2371,11 +2372,13 @@ def process_batch_results(options):
             animal_threshold = animal_threshold.get(
                 "animal", animal_threshold.get("1", 0.0)
             )
+        # Pass include_blank_csv if present, else default to False
+        include_all = getattr(options, "include_all", False)
         write_sequence_max_detection_csv(
             md_results,
             output_dir,
-            options.image_base_dir,
             confidence_threshold=animal_threshold,
+            include_all=include_all,
         )
         # Use the new function to get the HTML table
         csv_path = os.path.join(output_dir, "sequence_max_detections.csv")
@@ -2531,6 +2534,11 @@ def main():  # noqa
         default="cetartiodactyla",
         help="Keyword to search for in classification names when separating animals (default: cetartiodactyla)",
     )
+    parser.add_argument(
+        "--include_all",
+        action="store_true",
+        help="Include blank and human",
+    )
 
     if len(sys.argv[1:]) == 0:
         parser.print_help()
@@ -2546,6 +2554,9 @@ def main():  # noqa
         args.parallelize_rendering_n_cores = args.n_cores
 
     args_to_object(args, options)
+
+    # Propagate include_blank_csv to options
+    options.include_all = args.include_all
 
     if args.no_separate_detections_by_category:
         options.separate_detections_by_category = False

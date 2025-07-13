@@ -37,6 +37,22 @@ def relative_sas_url(folder_url, relative_path):
     return tokens[0] + relative_path + "?" + tokens[1]
 
 
+def discard_sequences_with_humans(group, confidence_threshold=0.2):
+    # Skip this sequence if the top detection in any image is a person
+    discard_sequence = False
+    for im in group:
+        detections = im.get("detections", [])
+        if detections:
+            top_det = max(detections, key=lambda d: d.get("conf", 0.0))
+            if (
+                top_det.get("category") == "2"
+                and top_det.get("conf", 0.0) >= confidence_threshold
+            ):
+                discard_sequence = True
+                break
+    return discard_sequence
+
+
 def write_sequence_max_detection_csv(
     md_results,
     output_dir,
@@ -59,32 +75,27 @@ def write_sequence_max_detection_csv(
 
     rows = []
     for seq_id, group in seq_to_images.items():
-        # Skip this sequence if the top detection in any image is a person
-        discard_sequence = False
-        for im in group:
-            detections = im.get("detections", [])
-            if detections:
-                top_det = max(detections, key=lambda d: d.get("conf", 0.0))
-                if top_det.get("category") == "2":
-                    discard_sequence = True
-                    break
-        if discard_sequence:
+        if (not include_all) and discard_sequences_with_humans(
+            group, confidence_threshold
+        ):
+            print("Skipping sequence with human as top detection:", seq_id)
             continue
+
         # Find image with max detections (using all detections, but count only those above threshold)
-        max_img = max(group, key=lambda im: len(im.get("detections", [])))
-        detections = max_img.get("detections", [])
-        # Only count animal detections above threshold
-        animal_detections = [
-            det
-            for det in detections
-            if det.get("category") == "1"
-            and det.get("conf", 0.0) >= confidence_threshold
-        ]
-        # Exclude if there are any human detections in this image
-        if not animal_detections:
+        def count_animal_detections(im, threshold=0.2):
+            return sum(
+                1
+                for det in im.get("detections", [])
+                if det.get("category") == "1"
+                and det.get("conf", 0.0) >= confidence_threshold
+            )
+
+        max_img = max(group, key=lambda im: count_animal_detections(im))
+        max_count = count_animal_detections(max_img)
+        if (max_count == 0) and (not include_all):
+            print("Skipping sequence with zero animal detections:", max_img["file"])
             continue
         file_name = max_img["file"]
-        max_count = len(animal_detections)
         # Date/time extraction
         dt = max_img.get("datetime", "")
         date, time = "", ""
@@ -96,7 +107,10 @@ def write_sequence_max_detection_csv(
                 date = dt
         # Get species from 'prediction' field (smoothed, preferred)
         pred = max_img.get("smoothed_class", "")
-        species = pred.split(";")[-1]
+        if pred:
+            species = pred.split(";")[-1]
+        else:
+            species = "blank"
         # Exclude if the species is 'human' (case-insensitive)
         excluding = {"human", "blank"}
         if species in excluding and not include_all:
